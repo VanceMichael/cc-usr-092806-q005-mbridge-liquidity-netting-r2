@@ -124,6 +124,190 @@ CREATE TABLE IF NOT EXISTS scheduled_jobs (
     last_error TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS jobs_due ON scheduled_jobs(status, run_at, lease_until);
+
+-- 清算走廊、窗口、净额结算 ------------------------------------------------
+CREATE TABLE IF NOT EXISTS cl_corridors (
+    corridor_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    base_currency TEXT NOT NULL,
+    quote_currency TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    created_by TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS cl_participants (
+    corridor_id TEXT NOT NULL,
+    org_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    authorized_counterparties_json TEXT NOT NULL DEFAULT '[]',
+    added_at TEXT NOT NULL,
+    added_by TEXT NOT NULL,
+    PRIMARY KEY(corridor_id, org_id)
+);
+CREATE TABLE IF NOT EXISTS cl_windows (
+    window_id TEXT PRIMARY KEY,
+    corridor_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    opens_at TEXT NOT NULL,
+    closes_at TEXT NOT NULL,
+    status TEXT NOT NULL,
+    rate_id TEXT,
+    net_positions_json TEXT NOT NULL DEFAULT '{}',
+    closed_by TEXT,
+    closed_at TEXT,
+    approved_by TEXT,
+    approved_at TEXT,
+    settled_by TEXT,
+    settled_at TEXT,
+    created_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    UNIQUE(corridor_id, seq)
+);
+CREATE INDEX IF NOT EXISTS cl_window_time ON cl_windows(corridor_id, opens_at, closes_at);
+CREATE TABLE IF NOT EXISTS cl_rates (
+    rate_id TEXT PRIMARY KEY,
+    corridor_id TEXT NOT NULL,
+    window_id TEXT,
+    version INTEGER NOT NULL,
+    rate TEXT NOT NULL,
+    status TEXT NOT NULL,
+    entered_by TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    UNIQUE(corridor_id, window_id, version)
+);
+CREATE TABLE IF NOT EXISTS cl_limits (
+    corridor_id TEXT NOT NULL,
+    org_id TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    amount_minor INTEGER NOT NULL,
+    version INTEGER NOT NULL,
+    changed_by TEXT NOT NULL,
+    changed_at TEXT NOT NULL,
+    PRIMARY KEY(corridor_id, org_id, currency, version)
+);
+CREATE TABLE IF NOT EXISTS cl_liquidity_entries (
+    entry_id TEXT PRIMARY KEY,
+    corridor_id TEXT NOT NULL,
+    org_id TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    amount_minor INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    reference TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    posted_by TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS cl_liquidity_org ON cl_liquidity_entries(corridor_id, org_id, currency, kind);
+CREATE TABLE IF NOT EXISTS cl_batches (
+    batch_id TEXT PRIMARY KEY,
+    corridor_id TEXT NOT NULL,
+    window_id TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    rate_id TEXT,
+    total_amount_minor INTEGER NOT NULL DEFAULT 0,
+    net_positions_json TEXT NOT NULL DEFAULT '{}',
+    pause_reason TEXT NOT NULL DEFAULT '',
+    paused_by TEXT NOT NULL DEFAULT '',
+    paused_at TEXT,
+    created_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    closed_by TEXT NOT NULL DEFAULT '',
+    closed_at TEXT,
+    settled_by TEXT NOT NULL DEFAULT '',
+    settled_at TEXT,
+    UNIQUE(window_id, currency)
+);
+CREATE TABLE IF NOT EXISTS cl_batch_members (
+    member_id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL,
+    window_id TEXT NOT NULL,
+    instruction_id TEXT NOT NULL,
+    source_sequence INTEGER NOT NULL,
+    amount_minor INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    role TEXT NOT NULL,
+    added_at TEXT NOT NULL,
+    removed_at TEXT,
+    removal_reason TEXT NOT NULL DEFAULT ''
+);
+-- 一条指令同一时刻只能是一个批次的有效成员
+CREATE UNIQUE INDEX IF NOT EXISTS cl_member_active ON cl_batch_members(instruction_id) WHERE status='active';
+CREATE INDEX IF NOT EXISTS cl_member_batch ON cl_batch_members(batch_id, status);
+CREATE TABLE IF NOT EXISTS cl_instructions (
+    instruction_id TEXT PRIMARY KEY,
+    corridor_id TEXT NOT NULL,
+    window_id TEXT NOT NULL,
+    batch_id TEXT,
+    obligation_ref TEXT NOT NULL,
+    payer_org TEXT NOT NULL,
+    payee_org TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    amount_minor INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    source TEXT NOT NULL,
+    source_key TEXT NOT NULL,
+    source_sequence INTEGER NOT NULL,
+    rate_id TEXT,
+    limit_version INTEGER,
+    usage_at_freeze_minor INTEGER NOT NULL DEFAULT 0,
+    debit_entry_id TEXT,
+    credit_entry_id TEXT,
+    released_by TEXT NOT NULL DEFAULT '',
+    frozen_at TEXT NOT NULL,
+    frozen_by TEXT NOT NULL,
+    matched_at TEXT,
+    settled_at TEXT,
+    returned_at TEXT,
+    cancelled_at TEXT,
+    UNIQUE(source, source_key)
+);
+CREATE INDEX IF NOT EXISTS cl_instruction_window ON cl_instructions(window_id, status);
+CREATE INDEX IF NOT EXISTS cl_instruction_obligation ON cl_instructions(corridor_id, obligation_ref);
+CREATE TABLE IF NOT EXISTS cl_bridge_events (
+    source TEXT NOT NULL,
+    source_key TEXT NOT NULL,
+    sequence INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    payload_digest TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    received_at TEXT NOT NULL,
+    status TEXT NOT NULL,
+    instruction_id TEXT,
+    window_id TEXT,
+    batch_id TEXT,
+    PRIMARY KEY(source, source_key, sequence)
+);
+CREATE INDEX IF NOT EXISTS cl_bridge_status ON cl_bridge_events(source, status, sequence);
+CREATE TABLE IF NOT EXISTS cl_bridge_conflicts (
+    conflict_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,
+    source_key TEXT NOT NULL,
+    sequence INTEGER NOT NULL,
+    existing_digest TEXT NOT NULL,
+    incoming_digest TEXT NOT NULL,
+    received_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS cl_bridge_cursors (
+    source TEXT PRIMARY KEY,
+    last_sequence INTEGER NOT NULL,
+    last_confirmed_sequence INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS cl_adjustments (
+    adjustment_id TEXT PRIMARY KEY,
+    corridor_id TEXT NOT NULL,
+    original_batch_id TEXT NOT NULL,
+    original_window_id TEXT NOT NULL,
+    new_window_id TEXT,
+    reason TEXT NOT NULL,
+    status TEXT NOT NULL,
+    reversal_entries_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    created_by TEXT NOT NULL
+);
 """
 
 

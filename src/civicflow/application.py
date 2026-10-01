@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .audit import AuditLog
+from .clearing import ClearingService
 from .database import Database
 from .idempotency import IdempotencyStore
 from .inbox import Inbox
@@ -27,13 +28,14 @@ class CivicFlow:
     ledger: Ledger
     reservations: ReservationBook
     jobs: JobQueue
+    clearing: ClearingService
 
     @classmethod
     def open(cls, path: str | Path, *, fixed_now: str | None = None) -> "CivicFlow":
         database = Database(path); database.initialize(); clock = Clock(fixed_now)
         audit = AuditLog(clock); idempotency = IdempotencyStore(clock)
         repository = EntityRepository(database, clock, audit, idempotency)
-        return cls(database, clock, repository, Inbox(database, clock), Outbox(database, clock), Ledger(database, clock), ReservationBook(database), JobQueue(database, clock))
+        return cls(database, clock, repository, Inbox(database, clock), Outbox(database, clock), Ledger(database, clock), ReservationBook(database), JobQueue(database, clock), ClearingService(database, clock, audit))
 
     def verify(self) -> dict:
         with self.database.connect() as connection:
