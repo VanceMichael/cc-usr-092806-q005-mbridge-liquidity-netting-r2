@@ -14,6 +14,7 @@ class AccessContext:
     permissions: frozenset[str] = field(default_factory=frozenset)
     scopes: frozenset[str] = field(default_factory=frozenset)
     reveal_sensitive: bool = False
+    org_id: str | None = None
 
     @classmethod
     def system(cls, actor_id: str = "system") -> "AccessContext":

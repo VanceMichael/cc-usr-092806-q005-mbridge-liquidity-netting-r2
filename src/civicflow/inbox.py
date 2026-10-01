@@ -26,10 +26,13 @@ class Inbox:
             if row:
                 if row["payload_digest"] != digest:
                     connection.execute("INSERT INTO inbox_conflicts(source,source_key,sequence,existing_digest,incoming_digest,received_at) VALUES(?,?,?,?,?,?)", (source, source_key, sequence, row["payload_digest"], digest, self.clock.now()))
-                    raise ConflictError("相同来源序号出现不同内容")
-                return {"status": "duplicate", "digest": digest}
-            connection.execute("INSERT INTO inbox_messages(source,source_key,sequence,payload_digest,payload_json,occurred_at,received_at,status) VALUES(?,?,?,?,?,?,?,?)", (source, source_key, sequence, digest, canonical_json(payload), occurred_at, self.clock.now(), "accepted"))
-            return {"status": "accepted", "digest": digest}
+                else:
+                    return {"status": "duplicate", "digest": digest}
+            else:
+                connection.execute("INSERT INTO inbox_messages(source,source_key,sequence,payload_digest,payload_json,occurred_at,received_at,status) VALUES(?,?,?,?,?,?,?,?)", (source, source_key, sequence, digest, canonical_json(payload), occurred_at, self.clock.now(), "accepted"))
+                return {"status": "accepted", "digest": digest}
+        # 异文事件已落库隔离，随后抛出，调用方事务无法再将其回滚。
+        raise ConflictError("相同来源序号出现不同内容")
 
     def timeline(self, source: str, source_key: str) -> list[dict]:
         with self.database.connect() as connection:
